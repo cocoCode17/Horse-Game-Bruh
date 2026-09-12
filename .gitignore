@@ -1,5 +1,6 @@
 ### VS Code
 export/*
+bin/*
 .vscode/*
 .haxelib/
 *.code-workspace

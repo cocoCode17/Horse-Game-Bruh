@@ -1,0 +1,230 @@
+import lime.project.*;
+import lime.tools.*;
+import hxp.*;
+import sys.FileSystem;
+import sys.io.File;
+import haxe.io.Path;
+
+using StringTools;
+
+class Project extends HXProject
+{
+    // _________________________ Constantes de Aplicación _________________________
+    static final TITLE:String = "HorseGame";
+    static final EXECUTABLE:String = "HorseGame";
+    static final PACKAGE_NAME:String = "com.haxeflixel.horsegame";
+    static final VERSION:String = "0.0.1";
+    static final COMPANY:String = "HaxeFlixel";
+    static final MAIN_CLASS:String = "Main";
+    static final PRELOADER:String = "flixel.system.FlxPreloader";
+
+    // ____________________________ Feature Flags ____________________________
+    static final DEBUG_MODE:FeatureFlag = "DEBUG_MODE";
+
+    public function new()
+    {
+        super();
+
+        configureApp();
+        configureFeatureFlags();
+        configureCompileDefines();
+        configureHaxelibs();
+        configureAssets();
+    }
+
+    function configureApp()
+    {
+        this.meta.title = TITLE;
+        this.meta.version = VERSION;
+        this.meta.packageName = PACKAGE_NAME;
+        this.meta.company = COMPANY;
+
+        this.app.main = MAIN_CLASS;
+        this.app.file = EXECUTABLE;
+        this.app.preloader = PRELOADER;
+
+        this.sources.push("source");
+
+        this.window.width = 840;
+        this.window.height = 680;
+        this.window.fps = 60;
+        this.window.background = 0x000000;
+        this.window.hardware = true;
+        this.window.vsync = false;
+
+        if (isWeb())
+            this.window.resizable = true;
+
+        if (isDesktop())
+        {
+            this.window.fullscreen = false;
+            this.window.resizable = true;
+        }
+
+        if (isMobile())
+        {
+            this.window.fullscreen = true;
+            this.window.width = 0;
+            this.window.height = 0;
+        }
+    }
+
+    function configureFeatureFlags()
+    {
+        // Activa o desactiva el modo debug por defecto según el build (o pásalo por terminal)
+        DEBUG_MODE.apply(this, debug);
+    }
+
+    function configureCompileDefines()
+    {
+        setHaxedef("SWF_VERSION", "11.8");
+        setHaxedef("BUILD_DIR", "export");
+        setHaxedef("FLX_NO_HEALTH");
+        setHaxedef("message.reporting", "pretty");
+
+        if (isMobile())
+        {
+            setHaxedef("FLX_NO_MOUSE");
+            setHaxedef("FLX_NO_KEYBOARD");
+        }
+
+        if (isDesktop())
+        {
+            setHaxedef("FLX_NO_TOUCH");
+        }
+
+        // Lógica según la FeatureFlag de DEBUG_MODE
+        if (DEBUG_MODE.isEnabled(this))
+        {
+            setHaxedef("HXC_DEBUG_TRACE");
+            haxeflags.push("-dce no"); // Mantiene todas las clases en compilaciones de pruebas
+        }
+        else
+        {
+            setHaxedef("FLX_NO_DEBUG");
+            setHaxedef("NAPE_RELEASE_BUILD");
+            setHaxedef("analyzer-optimize");
+        }
+    }
+
+    function configureHaxelibs()
+    {
+        haxelibs.push(new Haxelib("flixel"));
+        haxelibs.push(new Haxelib("flixel-addons"));
+        haxelibs.push(new Haxelib("flixel-ui"));
+
+        if (DEBUG_MODE.isEnabled(this))
+        {
+            // Puedes agregar librerías exclusivas de pruebas si las usas más adelante
+            // haxelibs.push(new Haxelib("hxcpp-debug-server"));
+        }
+    }
+
+    function configureAssets()
+    {
+        if (FileSystem.exists("assets"))
+            includeAssets("assets", "assets");
+
+        if (FileSystem.exists("contents"))
+            includeAssets("contents", "contents");
+    }
+
+    // ____________________________ Helper Methods ____________________________
+
+    public function isWeb():Bool
+    {
+        return target == Platform.HTML5;
+    }
+
+    public function isDesktop():Bool
+    {
+        return switch (target)
+        {
+            case Platform.WINDOWS, Platform.MAC, Platform.LINUX: true;
+            default: false;
+        }
+    }
+
+    public function isMobile():Bool
+    {
+        return switch (target)
+        {
+            case Platform.ANDROID, Platform.IOS: true;
+            default: false;
+        }
+    }
+
+    public function setHaxedef(name:String, ?value:String)
+    {
+        haxedefs.set(name, value ?? "");
+    }
+}
+
+/**
+ * Representa una bandera de característica configurable en compilación.
+ */
+abstract FeatureFlag(String) from String to String
+{
+    static final INVERSE_PREFIX:String = "NO_";
+
+    public function new(input:String)
+    {
+        this = input;
+    }
+
+    @:from
+    public static function fromString(input:String):FeatureFlag
+    {
+        return new FeatureFlag(input);
+    }
+
+    public function apply(project:Project, enableByDefault:Bool = false):Void
+    {
+        if (isEnabled(project))
+        {
+            getInverse().disable(project, false);
+        }
+        else if (getInverse().isEnabled(project))
+        {
+            disable(project, false);
+        }
+        else
+        {
+            if (enableByDefault)
+                enable(project, true);
+            else
+                disable(project, true);
+        }
+    }
+
+    public function enable(project:Project, andInverse:Bool = true)
+    {
+        project.haxedefs.set(this, "");
+        if (andInverse)
+            getInverse().disable(project, false);
+    }
+
+    public function disable(project:Project, andInverse:Bool = true)
+    {
+        project.haxedefs.remove(this);
+        if (andInverse)
+            getInverse().enable(project, false);
+    }
+
+    public function isEnabled(project:Project):Bool
+    {
+        return project.haxedefs.exists(this) || project.defines.exists(this);
+    }
+
+    public function isDisabled(project:Project):Bool
+    {
+        return getInverse().isEnabled(project);
+    }
+
+    public function getInverse():FeatureFlag
+    {
+        if (this.startsWith(INVERSE_PREFIX))
+            return this.substring(INVERSE_PREFIX.length);
+        return INVERSE_PREFIX + this;
+    }
+}
